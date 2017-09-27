@@ -5,6 +5,7 @@ import pandas as pd
 from os.path import isdir, isfile, expanduser
 from os import makedirs
 from datetime import datetime, timedelta
+from gui import *
 
 # Edit apikeys.py to set your Poloniex API key and secret
 from apikeys import getkeys
@@ -13,6 +14,7 @@ from apikeys import getkeys
 chartpath = expanduser("~/charts/")
 tickerupdatedelay = 1
 balancesupdatedelay = 5
+chartsupdatedelay = 60
 
 makedirs(chartpath, exist_ok=True)
 
@@ -110,29 +112,43 @@ class livePoloData:
             self.balancesupdated = datetime.now()
             time.sleep(balancesupdatedelay)
 
+class Portfolio:
+    def __init__(self, currencies):
+        """
+        Load charts for currencies and create thread to keep them updated
+        :param currencies: list of currencies to work with, ie ["BCH", "ETH", "XMR]
+        """
+        self.chartdata = {}
+        self.currencies = currencies
+        for currency in currencies:
+            self.chartdata[currency] = loadchart(currency, datetime.now() - timedelta(days=30), datetime.now())
+
+        self.chartthread = threading.Thread(target=self.chartsupdate)
+        self.chartthread.setDaemon(True)
+        self.chartthread.start()
+
+    def chartsupdate(self):
+        while True:
+            for currency in self.currencies:
+                self.chartdata[currency] = updatechart(currency, self.chartdata[currency])
+            time.sleep(chartsupdatedelay)
 
 # get API key and secret and create polo object
 api_key, api_secret = getkeys()
 polo = Poloniex(api_key, api_secret)
 livedata = livePoloData()
-ethchart = loadchart("ETH", datetime.now() - timedelta(days=30), datetime.now())
+portfolio = Portfolio(["BCH","ETH", "XMR", "ZEC"])
 
-# a quick test
-print("ETH chart, last entry\n", ethchart.tail(1)[["open", "high", "low","close"]],"\n\n")
-
+# simple tests print update times for livedata and last entry for each currency every minute
 # wait for ticker and balances first updates
 while livedata.ticker == {} or livedata.balances == {}:
     print(".", end="")
     time.sleep(.25)
 
-# print info for 5 minutes
-print("\nTickUpd  BalUpd   ETH        btcValue")
-for t in range(300):
-    print(livedata.tickerupdated.strftime("%H:%M:%S"),livedata.balancesupdated.strftime("%H:%M:%S"),
-          livedata.ticker["BTC_ETH"]["last"], livedata.balances["ETH"]["btcValue"], end="\r")
-
-    time.sleep(1)
-
-# update chart to confirm update function works
-ethchart = updatechart("ETH", ethchart)
-print("\nETH chart, updated last entry\n", ethchart.tail(1)[["open", "high", "low","close"]])
+for i in range(20):
+    print(livedata.tickerupdated.strftime("%H:%M:%S"), livedata.balancesupdated.strftime("%H:%M:%S"))
+    print("-------------")
+    for currency in portfolio.currencies:
+        print(currency, " last chart entry\n", portfolio.chartdata[currency].tail(3)[["open", "high", "low", "close"]])
+        print(currency, "last price", livedata.ticker["BTC_" + currency]["last"], "\n")
+    time.sleep(60)

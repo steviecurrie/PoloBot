@@ -28,3 +28,11 @@ Returns updated chart in a pandas dataframe.
 
 ### class livePoloData:
 Threads to provide ticker and balances
+
+### class Portfolio:
+Class to load chart data and thread to automatically update charts
+provide it with a list of currencies to use.
+ie, portfolio = Portfolio(["BCH","ETH", "XMR", "ZEC"])
+
+portfolio.chartdata[currency] returns dataframe
+portfolio.currencies holds list of currencies created by __init__
