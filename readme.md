@@ -11,3 +11,20 @@ You need to install this first
 
 then run
 `python3 setup.py`
+
+## Progress so far...
+
+### retrievechartdata(currency, startdate, enddate, freq=300)
+Retrieves chart data from Poloniex API.
+Returns chart in a pandas dataframe.
+
+### loadchart(currency, startdate, enddate, freq=300)
+Loads chart data from ~/charts/ if it exists, otherwise calls retrievechartdata to retrieve it from Poloniex and saves it.
+Returns chart in a pandas dataframe.
+
+### updatechart(currency, chartdata, freq=300)
+Given existing chart dataframe, retrieves updated chart from Poloniex and saves to ~/charts/
+Returns updated chart in a pandas dataframe.
+
+### class livePoloData:
+Threads to provide ticker and balances
