@@ -9,8 +9,7 @@ You need to install this first
 
 (I couldn't find a way to to install a working poloniex wrapper from setup.py - this is a workaround for now)
 
-then run
-`python3 setup.py`
+You'll also need pandas
 
 ## Progress so far...
 
