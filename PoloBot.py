@@ -5,7 +5,6 @@ import pandas as pd
 from os.path import isdir, isfile, expanduser
 from os import makedirs
 from datetime import datetime, timedelta
-from gui import *
 
 # Edit apikeys.py to set your Poloniex API key and secret
 from apikeys import getkeys
