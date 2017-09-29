@@ -38,4 +38,4 @@ for example
 portfolio.chartdata holds a dictionary of pandas dataframes
 
 ### class BackTest
-A simple backtest.  Override addindicators and dostep.
+A simple backtest.  Override addindicators and dostep methods.

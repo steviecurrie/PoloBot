@@ -171,7 +171,7 @@ class BackTest:
 
     def dostep(self):
         '''
-        override this with code to add your own strategy code
+        Override this with code to add your own strategy code
         for example
         if self.step > self.ma:
             price = self.data.ix[self.step, "close"]
