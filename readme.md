@@ -1,5 +1,5 @@
 # PoloBot
-A trading bot for the Poloniex Exchange
+A trading bot for the Poloniex Exchange (Very much WIP)
 
 ## Installation
 
