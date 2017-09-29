@@ -230,8 +230,8 @@ class SMACrossoverBackTest(BackTest):
 
 class EMACrossoverBackTest(BackTest):
     def addindicators(self, **kwargs):
-        self.fastma = fastma
-        self.slowma = slowma
+        self.fastma = kwargs["fastma"]
+        self.slowma = kwargs["slowma"]
         self.data["fastma"] = self.data["close"].ewm(self.fastma).mean()
         self.data["slowma"] = self.data["close"].ewm(self.slowma).mean()
 
@@ -280,4 +280,3 @@ test = SMACrossoverBackTest(portfolio.chartdata["XMR"], fastma=25, slowma=100)
 initialvalue, finalvalue, profit = test.runtest()
 print("Start Value: {0:.8f}BTC, Final Value: {1:.8f}BTC, Profit {2:.2f}%".\
       format(initialvalue, finalvalue, profit))
-
