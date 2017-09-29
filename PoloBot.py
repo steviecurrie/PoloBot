@@ -251,8 +251,8 @@ class EMACrossoverBackTest(BackTest):
 
 
 # get API key and secret and create polo object
-#api_key, api_secret = getkeys()
-#polo = Poloniex(api_key, api_secret)
+# api_key, api_secret = getkeys()
+# polo = Poloniex(api_key, api_secret)
 # livedata = LivePoloData() # Don't need live updates for now
 # portfolio = Portfolio(["ETH", "XMR", "ZEC"], history=180, forcereload=False)
 
@@ -275,8 +275,8 @@ class EMACrossoverBackTest(BackTest):
 #         print("{0}: Profit {1:.2f}%".format(coin, profit))
 
 polo = Poloniex()
-portfolio = Portfolio(["XMR"])
-test = SMACrossoverBackTest(portfolio.chartdata["XMR"], fastma=25, slowma=100)
+portfolio = Portfolio(["ETH"])
+test = SMACrossoverBackTest(portfolio.chartdata["ETH"], fastma=50, slowma=200)
 initialvalue, finalvalue, profit = test.runtest()
 print("Start Value: {0:.8f}BTC, Final Value: {1:.8f}BTC, Profit {2:.2f}%".\
       format(initialvalue, finalvalue, profit))
