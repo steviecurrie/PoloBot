@@ -1,11 +1,11 @@
-from poloniex import Poloniex
-import time
 import threading
-import pandas as pd
-from os.path import isdir, isfile, expanduser
-from os import makedirs
+import time
 from datetime import datetime, timedelta
-from gui import *
+from os import makedirs
+from os.path import isfile, expanduser
+
+import pandas as pd
+from poloniex import Poloniex
 
 # Edit apikeys.py to set your Poloniex API key and secret
 from apikeys import getkeys
@@ -42,17 +42,18 @@ def retrievechartdata(currency, startdate, enddate, freq=300):
     return chartdata
 
 
-def loadchart(currency, startdate, enddate, freq=300):
+def loadchart(currency, startdate, enddate, freq=300, forcereload=False):
     """
     Function to load chart from csv file - if csv doesn't exist, call retreive to get it from Poloniex
     :param currency: string containing short name of currency, ie ETH, XMR, STEEM
     :param startdate: datetime for start of chart data
     :param enddate: datetime for end of chart data
     :param freq: int for chart frequency in seconds, ie 300 for 5 minutes, 3600 for 1 hour
+    :param forcereload: force download of chart data from polo, use if you need to use older data
     :return: chartdata: pandas dataframe with chartdata for this currency
     """
     path = chartpath + currency + ".csv"
-    if isfile(path):
+    if isfile(path) and not forcereload:
         print("Loading:", currency, end='', flush=True)
         chartdata = pd.read_csv(path, parse_dates=True, index_col="realdate")
         print(" OK.")
@@ -85,10 +86,10 @@ def updatechart(currency, chartdata, freq=300):
     return chartdata
 
 
-class livePoloData:
+class LivePoloData:
     def __init__(self):
-        self.tickerupdated = datetime(1970,1,1,0,0,0)
-        self.balancesupdated = datetime(1970,1,1,0,0,0)
+        self.tickerupdated = datetime(1970, 1, 1, 0, 0, 0)
+        self.balancesupdated = datetime(1970, 1, 1, 0, 0, 0)
         self.ticker = {}
         self.balances = {}
 
@@ -112,16 +113,20 @@ class livePoloData:
             self.balancesupdated = datetime.now()
             time.sleep(balancesupdatedelay)
 
+
 class Portfolio:
-    def __init__(self, currencies):
+    def __init__(self, currencies, history=30, forcereload=False):
         """
         Load charts for currencies and create thread to keep them updated
         :param currencies: list of currencies to work with, ie ["BCH", "ETH", "XMR]
+        :param history: number of days history to download
+        :param forcereload: force download of chart data from polo, use if you need to use older data
         """
         self.chartdata = {}
         self.currencies = currencies
         for currency in currencies:
-            self.chartdata[currency] = loadchart(currency, datetime.now() - timedelta(days=30), datetime.now())
+            self.chartdata[currency] = loadchart(currency, datetime.now() - timedelta(days=history),
+                                                 datetime.now(), forcereload=forcereload)
 
         self.chartthread = threading.Thread(target=self.chartsupdate)
         self.chartthread.setDaemon(True)
@@ -133,22 +138,146 @@ class Portfolio:
                 self.chartdata[currency] = updatechart(currency, self.chartdata[currency])
             time.sleep(chartsupdatedelay)
 
+
+class BackTest:
+    def __init__(self, data, tradepct=10, btcbalance=0.01, coinbalance=0.0,
+                 buyfee=0.25, sellfee=0.15, candlewidth=5, **kwargs):
+        self.data = data.asfreq(str(candlewidth) + 'Min', method='pad')
+        self.startbtcbalance = btcbalance
+        self.startcoinbalance = coinbalance
+        self.btcbalance = btcbalance
+        self.coinbalance = coinbalance
+        self.tradepct = tradepct
+        self.tradesizebtc = self.btcbalance * (self.tradepct / 100)
+        self.buyfeemult = 1 - (buyfee / 100)
+        self.sellfeemult = 1 - (sellfee / 100)
+        self.step = 0
+        self.testlength = self.data.shape[0]
+        self.addindicators(**kwargs)
+
+    def addindicators(self, **kwargs):
+        '''
+        override this with code to add your own indicators
+        for example
+        self.ma = ma
+        self.data["ma"] = self.data["close"].rolling(self.ma).mean()
+        '''
+        pass
+
+    def _dostep(self):
+        self.tradesizebtc = self.btcbalance * (self.tradepct / 100)
+        self.dostep()
+        self.step += 1
+
+    def dostep(self):
+        '''
+        override this with code to add your own strategy code
+        for example
+        if self.step > self.ma:
+            price = self.data.ix[self.step, "close"]
+            ma = self.data.ix[self.step, "ma"]
+
+            if price > ma:
+                self.buy(price)
+            elif price < ma:
+                self.sell(price)
+        '''
+        pass
+
+    def buy(self, price):
+        if self.btcbalance > self.tradesizebtc:
+            self.btcbalance -= self.tradesizebtc
+            self.coinbalance += ((self.tradesizebtc / price) * self.buyfeemult)
+            # print("Step:{0} Bought at {1:.8f}".format(self.step, price))
+
+    def sell(self, price):
+        if self.coinbalance > 0:
+            self.btcbalance += ((self.coinbalance * price) * self.sellfeemult)
+            self.coinbalance = 0.0
+            # print("Step:{0} Sold at {1:.8f}".format(self.step, price))
+
+    def runtest(self):
+        for i in range(self.testlength):
+            self._dostep()
+
+        finalvalue = self.btcbalance + (self.coinbalance * self.data.ix[self.testlength - 1, "close"])
+        initialvalue = self.startbtcbalance + (self.startcoinbalance * self.data.ix[0, "close"])
+        profit = ((finalvalue - initialvalue) / initialvalue) * 100
+        return initialvalue, finalvalue, profit
+
+
+class SMACrossoverBackTest(BackTest):
+    def addindicators(self, **kwargs):
+        self.fastma = kwargs["fastma"]
+        self.slowma = kwargs["slowma"]
+        self.data["fastma"] = self.data["close"].rolling(self.fastma).mean()
+        self.data["slowma"] = self.data["close"].rolling(self.slowma).mean()
+
+    def dostep(self):
+        if self.step > self.slowma:
+            prevfastma = self.data.ix[self.step - 1, "fastma"]
+            prevslowma = self.data.ix[self.step - 1, "slowma"]
+
+            price = self.data.ix[self.step, "close"]
+            fastma = self.data.ix[self.step, "fastma"]
+            slowma = self.data.ix[self.step, "slowma"]
+
+            if fastma > slowma and prevfastma < prevslowma:
+                self.buy(price)
+            elif fastma < slowma and prevfastma > prevslowma:
+                self.sell(price)
+
+
+class EMACrossoverBackTest(BackTest):
+    def addindicators(self, **kwargs):
+        self.fastma = fastma
+        self.slowma = slowma
+        self.data["fastma"] = self.data["close"].ewm(self.fastma).mean()
+        self.data["slowma"] = self.data["close"].ewm(self.slowma).mean()
+
+    def dostep(self):
+        if self.step > self.slowma:
+            prevfastma = self.data.ix[self.step - 1, "fastma"]
+            prevslowma = self.data.ix[self.step - 1, "slowma"]
+
+            price = self.data.ix[self.step, "close"]
+            fastma = self.data.ix[self.step, "fastma"]
+            slowma = self.data.ix[self.step, "slowma"]
+
+            if fastma > slowma and prevfastma < prevslowma:
+                self.buy(price)
+            elif fastma < slowma and prevfastma > prevslowma:
+                self.sell(price)
+
+
 # get API key and secret and create polo object
-api_key, api_secret = getkeys()
-polo = Poloniex(api_key, api_secret)
-livedata = livePoloData()
-portfolio = Portfolio(["BCH","ETH", "XMR", "ZEC"])
+#api_key, api_secret = getkeys()
+#polo = Poloniex(api_key, api_secret)
+# livedata = LivePoloData() # Don't need live updates for now
+# portfolio = Portfolio(["ETH", "XMR", "ZEC"], history=180, forcereload=False)
 
-# simple tests print update times for livedata and last entry for each currency every minute
-# wait for ticker and balances first updates
-while livedata.ticker == {} or livedata.balances == {}:
-    print(".", end="")
-    time.sleep(.25)
+# # Test Simple Moving Average Crossover
+# for fastma in range(5, 50, 5):
+#     slowma = fastma * 4
+#     print("\nMoving Average: Fast:{0} Slow:{1}".format(fastma, slowma))
+#     for coin in portfolio.currencies:
+#         test = SMACrossoverBackTest(portfolio.chartdata[coin], fastma=fastma, slowma=slowma)
+#         initialvalue, finalvalue, profit = test.runtest()
+#         print("{0}: Profit {1:.2f}%".format(coin, profit))
+#
+# # Test Exponential Moving Average Crossover
+# for fastma in range(5, 50, 5):
+#     slowma = fastma * 4
+#     print("\nMoving Average: Fast:{0} Slow:{1}".format(fastma, slowma))
+#     for coin in portfolio.currencies:
+#         test = EMACrossoverBackTest(portfolio.chartdata[coin], fastma=fastma, slowma=slowma)
+#         initialvalue, finalvalue, profit = test.runtest()
+#         print("{0}: Profit {1:.2f}%".format(coin, profit))
 
-for i in range(20):
-    print(livedata.tickerupdated.strftime("%H:%M:%S"), livedata.balancesupdated.strftime("%H:%M:%S"))
-    print("-------------")
-    for currency in portfolio.currencies:
-        print(currency, " last chart entry\n", portfolio.chartdata[currency].tail(3)[["open", "high", "low", "close"]])
-        print(currency, "last price", livedata.ticker["BTC_" + currency]["last"], "\n")
-    time.sleep(60)
+polo = Poloniex()
+portfolio = Portfolio(["XMR"])
+test = SMACrossoverBackTest(portfolio.chartdata["XMR"], fastma=25, slowma=100)
+initialvalue, finalvalue, profit = test.runtest()
+print("Start Value: {0:.8f}BTC, Final Value: {1:.8f}BTC, Profit {2:.2f}%".\
+      format(initialvalue, finalvalue, profit))
+

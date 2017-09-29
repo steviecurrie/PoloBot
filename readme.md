@@ -1,5 +1,5 @@
 # PoloBot
-A trading bot for the Poloniex Exchange
+A trading bot for the Poloniex Exchange (Very much WIP)
 
 ## Installation
 
@@ -7,10 +7,9 @@ You need to install this first
 
 `pip3 install https://github.com/s4w3d0ff/python-poloniex/archive/v0.4.6.zip`
 
-(I couldn't find a way to to install a working poloniex wrapper from setup.py - this is a workaround for now)
+(This was the only variant of the Poloniex API wrapper that works for me.)
 
-then run
-`python3 setup.py`
+You'll also need pandas
 
 ## Progress so far...
 
@@ -32,7 +31,11 @@ Threads to provide ticker and balances
 ### class Portfolio:
 Class to load chart data and thread to automatically update charts
 provide it with a list of currencies to use.
-ie, portfolio = Portfolio(["BCH","ETH", "XMR", "ZEC"])
 
-portfolio.chartdata[currency] returns dataframe
-portfolio.currencies holds list of currencies created by __init__
+for example
+`portfolio = Portfolio(["BCH","ETH", "XMR", "ZEC"])`
+
+portfolio.chartdata holds a dictionary of pandas dataframes
+
+### class BackTest
+A simple backtest.  Override addindicators and dostep.
