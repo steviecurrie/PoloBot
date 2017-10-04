@@ -27,7 +27,6 @@ class PoloData:
 
         self.markets = self._get_markets()
 
-
     def start_ticker(self, update_freq):
         self.ticker_update_freq = update_freq
         self._ticker_thread = threading.Thread(target=self._get_ticker)
@@ -261,18 +260,15 @@ class PriceCrossSMABackTest(BackTest):
 
     def dostep(self):
         if self.step > self.ma:
-            prevprice = self.data.ix[self.step-1, "close"]
+            prevprice = self.data.ix[self.step - 1, "close"]
             price = self.data.ix[self.step, "close"]
-            prevma = self.data.ix[self.step-1, "ma"]
+            prevma = self.data.ix[self.step - 1, "ma"]
             ma = self.data.ix[self.step, "ma"]
-
 
             if price > ma and prevprice < prevma:
                 self.buy(price)
             elif price < ma and prevprice > prevma:
                 self.sell(price)
-
-
 
 # # Test Simple Moving Average Crossover
 # for fastma in range(5, 50, 5):

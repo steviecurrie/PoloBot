@@ -1,20 +1,17 @@
-import time
 import tkinter as tk
 from os import makedirs
 from os.path import expanduser
 from os.path import isfile
 
 import matplotlib
+import matplotlib.dates as mdates
+from matplotlib import pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2TkAgg
+from matplotlib.finance import candlestick_ohlc
 
 from polodata import PoloData
 
 matplotlib.use("TkAgg")
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2TkAgg
-# from matplotlib.figure import Figure
-from matplotlib import pyplot as plt
-
-import matplotlib.dates as mdates
-from matplotlib.finance import candlestick_ohlc
 
 # global variables
 apptitle = "PoloBot v0.1"
@@ -82,13 +79,13 @@ class MainWindow(tk.Tk):
                 market_menu.add_cascade(label=mkt + str(idx), menu=submenu)
 
         chart_menu = tk.Menu(menubar)
-        chart_menu.add_command(label="5 Min", command=lambda f="5Min", w=0.0025: self._set_candle_width(f,w))
-        chart_menu.add_command(label="15 Min", command=lambda f="15Min", w=0.0075: self._set_candle_width(f,w))
-        chart_menu.add_command(label="30 Min", command=lambda f="30Min", w=0.015: self._set_candle_width(f,w))
-        chart_menu.add_command(label="1 Hour", command=lambda f="1H", w=0.03: self._set_candle_width(f,w))
-        chart_menu.add_command(label="3 Hour", command=lambda f="3H", w=0.1: self._set_candle_width(f,w))
-        chart_menu.add_command(label="6 Hour", command=lambda f="6H", w=0.2: self._set_candle_width(f,w))
-        chart_menu.add_command(label="12 Hour", command=lambda f="12H", w=0.4: self._set_candle_width(f,w))
+        chart_menu.add_command(label="5 Min", command=lambda f="5Min", w=0.0025: self._set_candle_width(f, w))
+        chart_menu.add_command(label="15 Min", command=lambda f="15Min", w=0.0075: self._set_candle_width(f, w))
+        chart_menu.add_command(label="30 Min", command=lambda f="30Min", w=0.015: self._set_candle_width(f, w))
+        chart_menu.add_command(label="1 Hour", command=lambda f="1H", w=0.03: self._set_candle_width(f, w))
+        chart_menu.add_command(label="3 Hour", command=lambda f="3H", w=0.1: self._set_candle_width(f, w))
+        chart_menu.add_command(label="6 Hour", command=lambda f="6H", w=0.2: self._set_candle_width(f, w))
+        chart_menu.add_command(label="12 Hour", command=lambda f="12H", w=0.4: self._set_candle_width(f, w))
         menubar.add_cascade(label="Candles", menu=chart_menu)
 
         menubar.add_cascade(label="Markets", menu=market_menu)
@@ -174,16 +171,17 @@ class MainWindow(tk.Tk):
                        tick["low24hr"])
             self.ax1.set_title(title_string)
             data = pdat.charts[self.market]
-            first_full_day = (data.index.to_period('H')[0]+1).to_timestamp()
+            first_full_day = (data.index.to_period('H')[0] + 1).to_timestamp()
             data = data[first_full_day:]
-            #data = data.asfreq(self._candle_freq, method='pad').tail(200)
-            data = data.resample(self._candle_freq).agg({'open': 'first','high': 'max','low': 'min', 'close': 'last'})
+            # data = data.asfreq(self._candle_freq, method='pad').tail(200)
+            data = data.resample(self._candle_freq).agg({'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last'})
             data = data.tail(200)
             data["Date"] = data.index
             data["MPLDate"] = data['Date'].apply(lambda date: mdates.date2num(date.to_pydatetime()))
             dataAr = [tuple(x) for x in data[['MPLDate', 'open', 'high', 'low', 'close']].to_records(index=False)]
             self.ax1.clear()
-            csticks = candlestick_ohlc(self.ax1, dataAr, width=self._candle_width, colorup="#50c040", colordown="#b04050")
+            csticks = candlestick_ohlc(self.ax1, dataAr, width=self._candle_width, colorup="#50c040",
+                                       colordown="#b04050")
 
             self.ax1.set_title(title_string)
             self.ax1.xaxis.set_major_formatter(mdates.DateFormatter('%d-%m %H:%M'))
