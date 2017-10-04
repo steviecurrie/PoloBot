@@ -9,33 +9,27 @@ You need to install this first
 
 (This was the only variant of the Poloniex API wrapper that works for me.)
 
-You'll also need pandas
+You'll also need pandas and matplotlib
 
 ## Progress so far...
 
-### retrievechartdata(currency, startdate, enddate, freq=300)
-Retrieves chart data from Poloniex API.
-Returns chart in a pandas dataframe.
+Rethought the whole lot.  Moved the Polo stuff to it's own file and created basic TKinter GUI.
+So far, there is a list of favourite markets on the left, a full list of markets in the menubar and a button to
+add/remove markets from the list.  It displays a candlestick chart of recent price data at a user selected interval.
 
-### loadchart(currency, startdate, enddate, freq=300)
-Loads chart data from ~/charts/ if it exists, otherwise calls retrievechartdata to retrieve it from Poloniex and saves it.
-Returns chart in a pandas dataframe.
+It's a start.
 
-### updatechart(currency, chartdata, freq=300)
-Given existing chart dataframe, retrieves updated chart from Poloniex and saves to ~/charts/
-Returns updated chart in a pandas dataframe.
+polodata.py contains the PoloData class with the following methods.
+start_ticker(update_freq) - starts ticker thread with update_freq in seconds
+stop_ticker() - stops ticker thread
+start_charts(update_freq, chart_path) - starts chart update thread with update_freq in seconds, saves charts to chart_path
+stop_charts() - stops chart update thread
+add_chart(market) - adds market to list of charts to keep updated, ie "BTC_ETH" or "USDT_BTC"
+remove_chart(market) - remove market from chart update list
 
-### class livePoloData:
-Threads to provide ticker and balances
+.charts holds a dictionary of charts, each chart is a pandas dataframe
+.ticker holds the latest price data, stored in a pandas dataframe
 
-### class Portfolio:
-Class to load chart data and thread to automatically update charts
-provide it with a list of currencies to use.
-
-for example
-`portfolio = Portfolio(["BCH","ETH", "XMR", "ZEC"])`
-
-portfolio.chartdata holds a dictionary of pandas dataframes
 
 ### class BackTest
 A simple backtest.  Override addindicators and dostep methods.

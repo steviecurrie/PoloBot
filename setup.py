@@ -1,4 +1,3 @@
-#from distutils.core import setup
 from setuptools import setup
 
 setup(
@@ -10,5 +9,5 @@ setup(
     author='Steven Currie',
     author_email='scayrsteven@gmail.com',
     description='Trading Bot to work on the Poloniex Exchange',
-    requires=['pandas', 'numpy', 'poloniex']
+    requires=['pandas', 'numpy', 'poloniex', 'matplotlib']
 )

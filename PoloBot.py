@@ -1,282 +1,211 @@
-import threading
 import time
-from datetime import datetime, timedelta
+import tkinter as tk
 from os import makedirs
-from os.path import isfile, expanduser
+from os.path import expanduser
+from os.path import isfile
 
-import pandas as pd
-from poloniex import Poloniex
+import matplotlib
 
-# Edit apikeys.py to set your Poloniex API key and secret
-from apikeys import getkeys
+from polodata import PoloData
+
+matplotlib.use("TkAgg")
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2TkAgg
+# from matplotlib.figure import Figure
+from matplotlib import pyplot as plt
+
+import matplotlib.dates as mdates
+from matplotlib.finance import candlestick_ohlc
 
 # global variables
+apptitle = "PoloBot v0.1"
 chartpath = expanduser("~/charts/")
-tickerupdatedelay = 1
-balancesupdatedelay = 5
-chartsupdatedelay = 60
-
 makedirs(chartpath, exist_ok=True)
+SM_MONO = ("mono", 6)
 
 
-def retrievechartdata(currency, startdate, enddate, freq=300):
-    """
-    Function to retreive chart data from poloniex
-    :param currency: string containing short name of currency, ie ETH, XMR, STEEM
-    :param startdate: datetime for start of chart data
-    :param enddate: datetime for end of chart data
-    :param freq: int for chart frequency in seconds, ie 300 for 5 minutes, 3600 for 1 hour
-    :return: chartdata: pandas dataframe with chartdata for this currency
-    """
-    startdate = startdate.timestamp()
-    enddate = enddate.timestamp()
-
-    rawchartdata = polo.returnChartData("BTC_" + currency, freq, startdate, enddate)
-    chartdata = pd.DataFrame(rawchartdata, dtype=float)
-    chartdata["realdate"] = [datetime.fromtimestamp(d) for d in chartdata["date"]]
-    chartdata.set_index(["realdate"], inplace=True)
-    chartdata.drop("date", axis=1, inplace=True)
-    chartdata = chartdata.drop_duplicates()
-    freqstr = str(int(freq / 60)) + "Min"
-    chartdata = chartdata.asfreq(freqstr, method='pad')
-    return chartdata
-
-
-def loadchart(currency, startdate, enddate, freq=300, forcereload=False):
-    """
-    Function to load chart from csv file - if csv doesn't exist, call retreive to get it from Poloniex
-    :param currency: string containing short name of currency, ie ETH, XMR, STEEM
-    :param startdate: datetime for start of chart data
-    :param enddate: datetime for end of chart data
-    :param freq: int for chart frequency in seconds, ie 300 for 5 minutes, 3600 for 1 hour
-    :param forcereload: force download of chart data from polo, use if you need to use older data
-    :return: chartdata: pandas dataframe with chartdata for this currency
-    """
-    path = chartpath + currency + ".csv"
-    if isfile(path) and not forcereload:
-        print("Loading:", currency, end='', flush=True)
-        chartdata = pd.read_csv(path, parse_dates=True, index_col="realdate")
-        print(" OK.")
-    else:
-        print("Downloading:", currency)
-        chartdata = retrievechartdata(currency, startdate, enddate, freq)
-        chartdata.to_csv(path)
-    return chartdata
-
-
-def updatechart(currency, chartdata, freq=300):
-    """
-    Function to update provide chart with latest data from Poloniex
-    :param currency: string containing short name of currency, ie ETH, XMR, STEEM
-    :param chartdata: pandas dataframe with chartdata for this currency
-    :param freq: int for chart frequency in seconds, ie 300 for 5 minutes, 3600 for 1 hour
-    :return: chartdata: pandas dataframe with updated chartdata for this currency
-    """
-    path = chartpath + currency + ".csv"
-    nextentry = chartdata.ix[-1].name.to_pydatetime() + timedelta(minutes=int(freq / 60))
-    update = retrievechartdata(currency, nextentry, datetime.now(), freq)
-
-    # noinspection PyUnresolvedReferences
-    if update.shape[0] > 1:
-        chartdata = pd.concat([chartdata, update])
-        chartdata = chartdata.drop_duplicates()
-        freqstr = str(int(freq / 60)) + "Min"
-        chartdata = chartdata.asfreq(freqstr, method='pad')
-        chartdata.to_csv(path)
-    return chartdata
-
-
-class LivePoloData:
+class MainWindow(tk.Tk):
     def __init__(self):
-        self.tickerupdated = datetime(1970, 1, 1, 0, 0, 0)
-        self.balancesupdated = datetime(1970, 1, 1, 0, 0, 0)
-        self.ticker = {}
-        self.balances = {}
+        self.displaying = None
+        tk.Tk.__init__(self)
+        self.title(apptitle)
+        self.maxsize(width=1280, height=1024)
+        self.minsize(width=800, height=600)
+        self.resizable(True, True)
 
-        self.tickerthread = threading.Thread(target=self.getticker)
-        self.tickerthread.setDaemon(True)
-        self.tickerthread.start()
+        if isfile(chartpath + ".cfg"):
+            with open(chartpath + ".cfg", "r") as f:
+                self.active_currencies = f.readline().strip().split(",")
+        else:
+            self.active_currencies = ["USDT_BTC"]
+        self.market = None
+        self.prev_market = None
+        self._set_market(self.active_currencies[0])
+        self._candle_freq = "5Min"
+        self._candle_width = 0.002
+        self._ticker_button_dict = {}
 
-        self.balancesthread = threading.Thread(target=self.getbalances)
-        self.balancesthread.setDaemon(True)
-        self.balancesthread.start()
+        self._chart_last_drawn = None
+        self._chart_changed = True
+        self._after_id = None
 
-    def getticker(self):
-        while True:
-            self.ticker = polo.returnTicker()
-            self.tickerupdated = datetime.now()
-            time.sleep(tickerupdatedelay)
+        self.root_frame = tk.Frame(self)
+        self.root_frame.pack(side="top", fill="both", expand=True)
 
-    def getbalances(self):
-        while True:
-            self.balances = polo.returnCompleteBalances()
-            self.balancesupdated = datetime.now()
-            time.sleep(balancesupdatedelay)
+        menubar = tk.Menu(self)
+        filemenu = tk.Menu(menubar, tearoff=0)
+        filemenu.add_command(label="Options", command=self.bell())
+        filemenu.add_separator()
+        filemenu.add_command(label="Exit", command=self._stop_everything)
+        menubar.add_cascade(label="File", menu=filemenu)
+
+        market_menu = tk.Menu(menubar)
+        for mkt in sorted(pdat.markets):
+            if pdat.markets[mkt].index.shape[0] < 17:
+                submenu = tk.Menu(market_menu)
+                for coin in sorted(pdat.markets[mkt].index):
+                    submenu.add_command(label=coin, command=lambda m=mkt + "_" + coin: self._set_market(m))
+                market_menu.add_cascade(label=mkt, menu=submenu)
+            else:
+                arr = sorted(pdat.markets[mkt].index)
+                size = 16
+                idx = 1
+                while len(arr) > size:
+                    sub = arr[:size]
+                    submenu = tk.Menu(market_menu)
+                    for coin in sub:
+                        submenu.add_command(label=coin, command=lambda m=mkt + "_" + coin: self._set_market(m))
+                    market_menu.add_cascade(label=mkt + str(idx), menu=submenu)
+                    arr = arr[size:]
+                    idx += 1
+                for coin in arr:
+                    submenu.add_command(label=coin, command=lambda m=mkt + "_" + coin: self._set_market(m))
+                market_menu.add_cascade(label=mkt + str(idx), menu=submenu)
+
+        chart_menu = tk.Menu(menubar)
+        chart_menu.add_command(label="5 Min", command=lambda f="5Min", w=0.0025: self._set_candle_width(f,w))
+        chart_menu.add_command(label="15 Min", command=lambda f="15Min", w=0.0075: self._set_candle_width(f,w))
+        chart_menu.add_command(label="30 Min", command=lambda f="30Min", w=0.015: self._set_candle_width(f,w))
+        chart_menu.add_command(label="1 Hour", command=lambda f="1H", w=0.03: self._set_candle_width(f,w))
+        chart_menu.add_command(label="3 Hour", command=lambda f="3H", w=0.1: self._set_candle_width(f,w))
+        chart_menu.add_command(label="6 Hour", command=lambda f="6H", w=0.2: self._set_candle_width(f,w))
+        chart_menu.add_command(label="12 Hour", command=lambda f="12H", w=0.4: self._set_candle_width(f,w))
+        menubar.add_cascade(label="Candles", menu=chart_menu)
+
+        menubar.add_cascade(label="Markets", menu=market_menu)
+        self.config(menu=menubar)
+
+        self.button_frame = tk.Frame(self.root_frame)
+        self.button_frame.pack(side='left', fill='y')
+        self.button_sub_frame = tk.Frame(self.button_frame)
+        self._add_market_buttons()
+
+        self.chart_frame = tk.Frame(self.root_frame)
+        self.chart_frame.pack(side='top', fill='both', expand=1)
+        self.figure = plt.figure(figsize=(7, 5))
+        self.ax1 = plt.subplot(1, 1, 1)
+        self.mpl_canvas = FigureCanvasTkAgg(self.figure, self.chart_frame)
+        self.mpl_canvas.show()
+        self.mpl_canvas.get_tk_widget().pack(side='top', fill='both', expand=1)
+
+        self._after_id = self.after(1500, func=self._chart_frame_update)
+
+        self.button_frame2 = tk.Frame(self.root_frame)
+        self.button_frame2.pack(side='bottom', fill='x')
+        button1 = tk.Button(self.button_frame2, text="<->", command=self._add_market)
+        button1.pack(side='left', fill='y')
+        button1 = tk.Button(self.button_frame2, text="Buy")
+        button1.pack(side='left', fill='y')
+        button2 = tk.Button(self.button_frame2, text="Sell")
+        button2.pack(side='left', fill='y')
+        button3 = tk.Button(self.button_frame2, text="Auto")
+        button3.pack(side='left', fill='y')
+
+        toolbar = NavigationToolbar2TkAgg(self.mpl_canvas, self.button_frame2)
+        toolbar.update()
+        self.mpl_canvas._tkcanvas.pack(side=tk.TOP, fill=tk.BOTH)
+
+        self.protocol("WM_DELETE_WINDOW", self._stop_everything)
+
+    def _set_candle_width(self, freq, width):
+        if width != self._candle_width:
+            self._candle_freq = freq
+            self._candle_width = width
+            self._chart_changed = True
+
+    def _add_market_buttons(self):
+        self.button_sub_frame.destroy()
+        self.button_sub_frame = tk.Frame(self.button_frame)
+        self.button_sub_frame.pack(side='left', fill='both')
+        self._ticker_button_list = {}
+        for mkt in sorted(self.active_currencies):
+            self._ticker_button_list[mkt] = tk.Button(self.button_sub_frame, text=mkt + "\n----.--------",
+                                                      command=lambda m=mkt: self._set_market(m))
+            self._ticker_button_list[mkt].pack(side='top', fill="x")
+        self.button_sub_frame.after(1000, func=self._update_button_prices)
+
+    def _update_button_prices(self):
+        for btn in self._ticker_button_list:
+            self._ticker_button_list[btn]["text"] = btn + "\n{:>13.8f}".format(pdat.ticker.ix[btn]["last"])
+        self.button_sub_frame.after(1000, func=self._update_button_prices)
+
+    def _add_market(self):
+        if self.market not in self.active_currencies:
+            self.active_currencies.append(self.market)
+        else:
+            self.active_currencies.remove(self.market)
+            pdat.remove_chart(self.market)
+        self._set_market(self.market)
+        self._add_market_buttons()
+
+    def _set_market(self, mkt):
+        self.title(apptitle + " - " + mkt)
+        self.prev_market = self.market
+        if self.market != mkt and self.market not in self.active_currencies:
+            pdat.remove_chart(self.market)
+        self.market = mkt
+        pdat.add_chart(mkt)
+        self._chart_changed = True
+
+    def _chart_frame_update(self):
+        if pdat.ticker.ix[self.market] is not None and pdat.charts[self.market] is not None and self._chart_changed:
+            tick = pdat.ticker.ix[self.market]
+            title_string = "{0} ({1})\nAsk:{2:10.8f} Bid:{3:10.8f}\n24hr High:{4:10.8f} 24hr Low:{5:10.8f}". \
+                format(self.market, self._candle_freq, tick["lowestAsk"], tick["highestBid"], tick["high24hr"],
+                       tick["low24hr"])
+            self.ax1.set_title(title_string)
+            data = pdat.charts[self.market]
+            first_full_day = (data.index.to_period('H')[0]+1).to_timestamp()
+            data = data[first_full_day:]
+            #data = data.asfreq(self._candle_freq, method='pad').tail(200)
+            data = data.resample(self._candle_freq).agg({'open': 'first','high': 'max','low': 'min', 'close': 'last'})
+            data = data.tail(200)
+            data["Date"] = data.index
+            data["MPLDate"] = data['Date'].apply(lambda date: mdates.date2num(date.to_pydatetime()))
+            dataAr = [tuple(x) for x in data[['MPLDate', 'open', 'high', 'low', 'close']].to_records(index=False)]
+            self.ax1.clear()
+            csticks = candlestick_ohlc(self.ax1, dataAr, width=self._candle_width, colorup="#50c040", colordown="#b04050")
+
+            self.ax1.set_title(title_string)
+            self.ax1.xaxis.set_major_formatter(mdates.DateFormatter('%d-%m %H:%M'))
+            self.ax1.xaxis.set_major_locator(mdates.AutoDateLocator())
+
+            self.figure.autofmt_xdate()
+            self._chart_last_drawn = pdat.charts[self.market].index.values[-1]
+            self._chart_changed = False
+            self.mpl_canvas.draw()
+        self._after_id = self.after(1500, func=self._chart_frame_update)
+
+    def _stop_everything(self):
+        self.after_cancel(self._after_id)
+        pdat.stop_ticker()
+        pdat.stop_charts()
+        self.destroy()
+        quit(0)
 
 
-class Portfolio:
-    def __init__(self, currencies, history=30, forcereload=False):
-        """
-        Load charts for currencies and create thread to keep them updated
-        :param currencies: list of currencies to work with, ie ["BCH", "ETH", "XMR]
-        :param history: number of days history to download
-        :param forcereload: force download of chart data from polo, use if you need to use older data
-        """
-        self.chartdata = {}
-        self.currencies = currencies
-        for currency in currencies:
-            self.chartdata[currency] = loadchart(currency, datetime.now() - timedelta(days=history),
-                                                 datetime.now(), forcereload=forcereload)
+pdat = PoloData()
+pdat.start_ticker(1)
+pdat.start_charts(60, chartpath)
 
-        self.chartthread = threading.Thread(target=self.chartsupdate)
-        self.chartthread.setDaemon(True)
-        self.chartthread.start()
-
-    def chartsupdate(self):
-        while True:
-            for currency in self.currencies:
-                self.chartdata[currency] = updatechart(currency, self.chartdata[currency])
-            time.sleep(chartsupdatedelay)
-
-
-class BackTest:
-    def __init__(self, data, tradepct=10, btcbalance=0.01, coinbalance=0.0,
-                 buyfee=0.25, sellfee=0.15, candlewidth=5, **kwargs):
-        self.data = data.asfreq(str(candlewidth) + 'Min', method='pad')
-        self.startbtcbalance = btcbalance
-        self.startcoinbalance = coinbalance
-        self.btcbalance = btcbalance
-        self.coinbalance = coinbalance
-        self.tradepct = tradepct
-        self.tradesizebtc = self.btcbalance * (self.tradepct / 100)
-        self.buyfeemult = 1 - (buyfee / 100)
-        self.sellfeemult = 1 - (sellfee / 100)
-        self.step = 0
-        self.testlength = self.data.shape[0]
-        self.addindicators(**kwargs)
-
-    def addindicators(self, **kwargs):
-        '''
-        override this with code to add your own indicators
-        for example
-        self.ma = ma
-        self.data["ma"] = self.data["close"].rolling(self.ma).mean()
-        '''
-        pass
-
-    def _dostep(self):
-        self.tradesizebtc = self.btcbalance * (self.tradepct / 100)
-        self.dostep()
-        self.step += 1
-
-    def dostep(self):
-        '''
-        Override this with code to add your own strategy code
-        for example
-        if self.step > self.ma:
-            price = self.data.ix[self.step, "close"]
-            ma = self.data.ix[self.step, "ma"]
-
-            if price > ma:
-                self.buy(price)
-            elif price < ma:
-                self.sell(price)
-        '''
-        pass
-
-    def buy(self, price):
-        if self.btcbalance > self.tradesizebtc:
-            self.btcbalance -= self.tradesizebtc
-            self.coinbalance += ((self.tradesizebtc / price) * self.buyfeemult)
-            # print("Step:{0} Bought at {1:.8f}".format(self.step, price))
-
-    def sell(self, price):
-        if self.coinbalance > 0:
-            self.btcbalance += ((self.coinbalance * price) * self.sellfeemult)
-            self.coinbalance = 0.0
-            # print("Step:{0} Sold at {1:.8f}".format(self.step, price))
-
-    def runtest(self):
-        for i in range(self.testlength):
-            self._dostep()
-
-        finalvalue = self.btcbalance + (self.coinbalance * self.data.ix[self.testlength - 1, "close"])
-        initialvalue = self.startbtcbalance + (self.startcoinbalance * self.data.ix[0, "close"])
-        profit = ((finalvalue - initialvalue) / initialvalue) * 100
-        return initialvalue, finalvalue, profit
-
-
-class SMACrossoverBackTest(BackTest):
-    def addindicators(self, **kwargs):
-        self.fastma = kwargs["fastma"]
-        self.slowma = kwargs["slowma"]
-        self.data["fastma"] = self.data["close"].rolling(self.fastma).mean()
-        self.data["slowma"] = self.data["close"].rolling(self.slowma).mean()
-
-    def dostep(self):
-        if self.step > self.slowma:
-            prevfastma = self.data.ix[self.step - 1, "fastma"]
-            prevslowma = self.data.ix[self.step - 1, "slowma"]
-
-            price = self.data.ix[self.step, "close"]
-            fastma = self.data.ix[self.step, "fastma"]
-            slowma = self.data.ix[self.step, "slowma"]
-
-            if fastma > slowma and prevfastma < prevslowma:
-                self.buy(price)
-            elif fastma < slowma and prevfastma > prevslowma:
-                self.sell(price)
-
-
-class EMACrossoverBackTest(BackTest):
-    def addindicators(self, **kwargs):
-        self.fastma = kwargs["fastma"]
-        self.slowma = kwargs["slowma"]
-        self.data["fastma"] = self.data["close"].ewm(self.fastma).mean()
-        self.data["slowma"] = self.data["close"].ewm(self.slowma).mean()
-
-    def dostep(self):
-        if self.step > self.slowma:
-            prevfastma = self.data.ix[self.step - 1, "fastma"]
-            prevslowma = self.data.ix[self.step - 1, "slowma"]
-
-            price = self.data.ix[self.step, "close"]
-            fastma = self.data.ix[self.step, "fastma"]
-            slowma = self.data.ix[self.step, "slowma"]
-
-            if fastma > slowma and prevfastma < prevslowma:
-                self.buy(price)
-            elif fastma < slowma and prevfastma > prevslowma:
-                self.sell(price)
-
-
-# get API key and secret and create polo object
-# api_key, api_secret = getkeys()
-# polo = Poloniex(api_key, api_secret)
-# livedata = LivePoloData() # Don't need live updates for now
-# portfolio = Portfolio(["ETH", "XMR", "ZEC"], history=180, forcereload=False)
-
-# # Test Simple Moving Average Crossover
-# for fastma in range(5, 50, 5):
-#     slowma = fastma * 4
-#     print("\nMoving Average: Fast:{0} Slow:{1}".format(fastma, slowma))
-#     for coin in portfolio.currencies:
-#         test = SMACrossoverBackTest(portfolio.chartdata[coin], fastma=fastma, slowma=slowma)
-#         initialvalue, finalvalue, profit = test.runtest()
-#         print("{0}: Profit {1:.2f}%".format(coin, profit))
-#
-# # Test Exponential Moving Average Crossover
-# for fastma in range(5, 50, 5):
-#     slowma = fastma * 4
-#     print("\nMoving Average: Fast:{0} Slow:{1}".format(fastma, slowma))
-#     for coin in portfolio.currencies:
-#         test = EMACrossoverBackTest(portfolio.chartdata[coin], fastma=fastma, slowma=slowma)
-#         initialvalue, finalvalue, profit = test.runtest()
-#         print("{0}: Profit {1:.2f}%".format(coin, profit))
-
-polo = Poloniex()
-portfolio = Portfolio(["ETH"])
-test = SMACrossoverBackTest(portfolio.chartdata["ETH"], fastma=50, slowma=200)
-initialvalue, finalvalue, profit = test.runtest()
-print("Start Value: {0:.8f}BTC, Final Value: {1:.8f}BTC, Profit {2:.2f}%".\
-      format(initialvalue, finalvalue, profit))
+app = MainWindow()
+app.mainloop()
