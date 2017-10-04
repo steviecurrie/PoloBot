@@ -20,14 +20,22 @@ add/remove markets from the list.  It displays a candlestick chart of recent pri
 It's a start.
 
 polodata.py contains the PoloData class with the following methods.
+
 start_ticker(update_freq) - starts ticker thread with update_freq in seconds
+
 stop_ticker() - stops ticker thread
+
 start_charts(update_freq, chart_path) - starts chart update thread with update_freq in seconds, saves charts to chart_path
+
 stop_charts() - stops chart update thread
+
 add_chart(market) - adds market to list of charts to keep updated, ie "BTC_ETH" or "USDT_BTC"
+
 remove_chart(market) - remove market from chart update list
 
+
 .charts holds a dictionary of charts, each chart is a pandas dataframe
+
 .ticker holds the latest price data, stored in a pandas dataframe
 
 
