@@ -80,7 +80,7 @@ class PoloData:
                 market, currency = chart.split("_")
                 if self.charts[chart] is None:
                     self.charts[chart] = self._load_chart(market, currency,
-                                                          datetime.now() - timedelta(days=30), datetime.now())
+                                                          datetime.now() - timedelta(days=90), datetime.now())
                     self._new_chart = False
                 else:
                     self.charts[chart] = self._update_chart(market, currency, self.charts[chart])
@@ -119,11 +119,11 @@ class PoloData:
     def _load_chart(self, market, currency, start_date, end_date, freq=300, force_reload=False):
         path = self.chart_path + market + "_" + currency + ".csv"
         if isfile(path) and not force_reload:
-            print("Loading:", market + "_" + currency, end='', flush=True)
+            # print("Loading:", market + "_" + currency, end='', flush=True)
             chart_data = pd.read_csv(path, parse_dates=True, index_col="Date")
-            print(" OK.")
+            # print(" OK.")
         else:
-            print("Downloading:", market + "_" + currency)
+            # print("Downloading:", market + "_" + currency)
             chart_data = self._retrieve_chart_data(market, currency, start_date, end_date, freq)
             chart_data.to_csv(path)
         return chart_data
@@ -132,7 +132,7 @@ class PoloData:
         path = self.chart_path + market + "_" + currency + ".csv"
         next_entry = chart_data.ix[-1].name.to_pydatetime() + timedelta(minutes=int(freq / 60))
         update = self._retrieve_chart_data(market, currency, next_entry, datetime.now(), freq)
-        print("Updating:", market + "_" + currency)
+        # print("Updating:", market + "_" + currency)
         if update.shape[0] > 1:
             chart_data = pd.concat([chart_data, update])
             chart_data = chart_data.drop_duplicates()
@@ -159,12 +159,12 @@ class BackTest:
         self.addindicators(**kwargs)
 
     def addindicators(self, **kwargs):
-        '''
+        """
         override this with code to add your own indicators
         for example
         self.ma = ma
         self.data["ma"] = self.data["close"].rolling(self.ma).mean()
-        '''
+        """
         pass
 
     def _dostep(self):
@@ -173,7 +173,7 @@ class BackTest:
         self.step += 1
 
     def dostep(self):
-        '''
+        """
         Override this with code to add your own strategy code
         for example
         if self.step > self.ma:
@@ -184,7 +184,7 @@ class BackTest:
                 self.buy(price)
             elif price < ma:
                 self.sell(price)
-        '''
+        """
         pass
 
     def buy(self, price):
