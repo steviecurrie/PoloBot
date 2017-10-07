@@ -439,16 +439,19 @@ class ChartFrame(tk.Frame):
         self.wait_window(self.cfg_win)
 
     def config_ok(self):
-        self.sma = [int(self.sma1.get()), int(self.sma2.get()), int(self.sma3.get())]
-        self.ema = [int(self.ema1.get()), int(self.ema2.get()), int(self.ema3.get())]
-        self.indicator = self.indicator_mode.get()
-        self.macd['ema_fast'] = int(self.macd_f_ema.get())
-        self.macd['ema_slow'] = int(self.macd_s_ema.get())
-        self.macd['ema_signal'] = int(self.macd_sig_ema.get())
-        self.rsi['periods'] = int(self.rsi_periods.get())
+        try:
+            self.sma = [int(self.sma1.get()), int(self.sma2.get()), int(self.sma3.get())]
+            self.ema = [int(self.ema1.get()), int(self.ema2.get()), int(self.ema3.get())]
+            self.indicator = self.indicator_mode.get()
+            self.macd['ema_fast'] = int(self.macd_f_ema.get())
+            self.macd['ema_slow'] = int(self.macd_s_ema.get())
+            self.macd['ema_signal'] = int(self.macd_sig_ema.get())
+            self.rsi['periods'] = int(self.rsi_periods.get())
 
-        self.cfg_win.destroy()
-        self.draw_chart()
+            self.cfg_win.destroy()
+            self.draw_chart()
+        except:
+            print("Error!")
 
 
 pdat = PoloData()
