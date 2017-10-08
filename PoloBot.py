@@ -16,15 +16,11 @@ SM_MONO = ("mono", 6)
 
 class MainWindow(tk.Tk):
     def __init__(self):
-        self.displaying = None
         tk.Tk.__init__(self)
         self.title(apptitle)
         self.maxsize(width=100, height=1024)
         self.minsize(width=100, height=100)
         self.resizable(False, True)
-
-        self.root_frame = tk.Frame(self)
-        self.root_frame.pack(side="top", fill="both", expand=True)
 
         menubar = tk.Menu(self)
         filemenu = tk.Menu(menubar, tearoff=0)
@@ -74,7 +70,6 @@ class MainWindow(tk.Tk):
         self.destroy()
         quit(0)
 
-
 class ChartFrame(tk.Frame):
     def __init__(self, parent, market, width, height):
         tk.Frame.__init__(self, parent)
@@ -93,7 +88,7 @@ class ChartFrame(tk.Frame):
         self.offset = -1
         self.candle_freq = '30Min'
         self._after_id = None
-
+        self.visible_data_length = None
         self.indicator = 'macd'
         self.macd = {'ema_fast': 12, 'ema_slow': 26, 'ema_signal': 9}
         self.rsi = {'periods': 14}
@@ -191,10 +186,11 @@ class ChartFrame(tk.Frame):
 
             first_full_day = (self.chart_data.index.to_period('H')[0] + 1).to_timestamp()
             data = self.chart_data[first_full_day:]
+
             data = data.resample(self.candle_freq).agg(
                 {'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum',
                  'weightedAverage': 'last'})
-
+            self.data_length = data.shape[0]
             for a in range(2):
                 data['sma' + str(a)] = data['weightedAverage'].rolling(self.sma[a]).mean()
                 data['ema' + str(a)] = data['weightedAverage'].ewm(self.ema[a]).mean()
@@ -353,12 +349,12 @@ class ChartFrame(tk.Frame):
         return y_out
 
     def change_offset(self, d):
-        if d == 0:
-            self.offset = 0
         self.offset += d
 
         if self.offset > -1:
             self.offset = -1
+        if self.offset < -self.data_length + 12:
+            self.offset = -self.data_length + 12
 
         self.draw_chart()
 
@@ -453,8 +449,68 @@ class ChartFrame(tk.Frame):
         except:
             print("Error!")
 
+class APIKeyInput(tk.Frame):
+    def __init__(self, parent):
+        tk.Frame.__init__(self, parent)
+        self.parent = parent
+        self.api_key = ""
+        self.api_secret = ""
+        tk.Label(self, text="Poloniex API Access", font=(24)).grid(row=0, column=0, columnspan=4)
+        tk.Label(self, text="API Key").grid(row=1, column=0)
+        self._api_key_entry = tk.Entry(self, width=40)
+        self._api_key_entry.grid(row=1, column=1, columnspan=3)
+        tk.Label(self, text="API Secret").grid(row=2, column=0)
+        self._api_secret_entry = tk.Entry(self, width=40)
+        self._api_secret_entry.grid(row=2, column=1, columnspan=3)
+        tk.Button(self, text='View Only', command=self._view_only).grid(row=3, column=2)
+        tk.Button(self, text='Full Access', command=self._test_entry).grid(row=3, column=3)
+        self._warning_label = tk.Label(self, text='', fg='red')
+        self._warning_label.grid(row=4, column=0, columnspan=4)
 
-pdat = PoloData()
+    def _view_only(self):
+        self.api_key = ''
+        self.api_secret = ''
+        self.parent.destroy()
+
+    def _test_entry(self):
+        self.api_key = self._api_key_entry.get()
+        self.api_secret = self._api_secret_entry.get()
+        warning = ''
+        if len(self.api_key) != 35:
+            warning += 'API Key error: format is 4 groups of 8 seperated by dashes!'
+        if len(self.api_secret) != 128:
+            if warning != '':
+                warning += '\n'
+            warning += 'API Secret error: should be 128 alphanumeric digits!'
+        if warning == '':
+            self.parent.destroy()
+
+        else:
+            self._warning_label["text"] = warning
+
+# quick and dirty api key input and save WARNING!! Saves as plain text
+filename = chartpath + '.key'
+if isfile(filename):
+    with open(filename,'r') as f:
+        api_key = f.readline().strip()
+        api_secret = f.readline().strip()
+else:
+    root = tk.Tk()
+    root.title("API Access " + apptitle)
+    api_frame = APIKeyInput(root)
+    api_frame.pack(fill=tk.BOTH, expand=tk.YES)
+    root.mainloop()
+
+    api_key = api_frame.api_key
+    api_secret = api_frame.api_secret
+    del root
+    del api_frame
+
+    with open(filename,'w') as f:
+        data = api_key + "\n" + api_secret
+        f.write(data)
+
+pdat = PoloData(api_key, api_secret)
 pdat.start_ticker(1)
 pdat.start_charts(60, chartpath)
 
