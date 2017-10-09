@@ -239,10 +239,10 @@ class ChartFrame(tk.Frame):
                                         x2, self._get_y(y, y_min, y_max, height, y2), fill='#c0c0d0', tags='chart')
                 y -= y_step
 
-            d = visible_data.ix[0].name.strftime("%-d%b %H:%M")
+            d = visible_data.ix[0].name.strftime("%d%b %H:%M")
             self.canvas.create_text(x1 + self.label_width, y2 + 2,
                                     text=d, anchor='nw', font=('Times', 6), tags='chart')
-            d = visible_data.ix[-1].name.strftime("%-d%b %H:%M")
+            d = visible_data.ix[-1].name.strftime("%d%b %H:%M")
             self.canvas.create_text(x2, y2 + 2,
                                     text=d, anchor='ne', font=('Times', 6), tags='chart')
 
