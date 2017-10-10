@@ -16,5 +16,8 @@ You'll also need pandas
 Removed the need for matplotlib - it was annoying me - created my own candlestick graph routines.
 Added SMA, EMA, MACD and RSI to charts.
 
-Next step, saving/loading configuration, including Polo API key & secret which will then allow balances, buying and selling.
+added input and saving of API key & secret - currently saved as plain text in the charts folder - needs work.
+added buy & sell, functionality.
+
+Next step, strategies and backtesting
 

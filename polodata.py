@@ -25,6 +25,12 @@ class PoloData:
         self.chart_path = None
         self._new_chart = False
 
+        self.balances_update_freq = 1
+        self.balances_updated = datetime(1970, 1, 1)
+        self.balances = None
+        self.balances_active = False
+        self._balances_thread = None
+
         self.markets = self._get_markets()
 
     def start_ticker(self, update_freq):
@@ -36,6 +42,7 @@ class PoloData:
 
     def _get_ticker(self):
         while self.ticker_active:
+            # print(datetime.now(), "Ticker Update")
             self._ticker = self._polo.returnTicker()
             self._populate_ticker()
             self.ticker_updated = datetime.now()
@@ -75,6 +82,7 @@ class PoloData:
 
     def _get_charts(self):
         while self.charts_active:
+            # print(datetime.now(), "Charts Update")
             update_time = datetime.now() + timedelta(seconds=self.charts_update_freq)
             for chart in self.charts:
                 market, currency = chart.split("_")
@@ -101,6 +109,24 @@ class PoloData:
     def remove_chart(self, market):
         if market is not None:
             del self.charts[market]
+
+    def start_balances(self, update_freq):
+        self.balances_update_freq = update_freq
+        self._balances_thread = threading.Thread(target=self._get_balances)
+        self._balances_thread.setDaemon(True)
+        self.balances_active = True
+        self._balances_thread.start()
+
+    def _get_balances(self):
+        while self.balances_active:
+            # print(datetime.now(), "Balances Update")
+            self.balances = self._polo.returnCompleteBalances()
+            self.balances_updated = datetime.now()
+            time.sleep(self.balances_update_freq)
+        print("Balances thread stopped.")
+
+    def stop_balances(self):
+        self.balances_active = False
 
     def _retrieve_chart_data(self, market, currency, start_date, end_date, freq=300):
         start_date = start_date.timestamp()
@@ -141,6 +167,40 @@ class PoloData:
             chart_data.to_csv(path)
         return chart_data
 
+    def calculate_macd(self, closes, ema_fast, ema_slow, ema_signal):
+        ema_fast = closes.ewm(ema_fast).mean()
+        ema_slow = closes.ewm(ema_slow).mean()
+        macd_line = ema_fast - ema_slow
+        signal_line = macd_line.ewm(ema_signal).mean()
+        histogram = macd_line - signal_line
+
+        return macd_line, signal_line, histogram
+
+    def calculate_rsi(self, closes, periods):
+        delta = closes.diff()
+        up_periods, down_periods = delta.copy(), delta.copy()
+        up_periods[up_periods <= 0] = 0
+        down_periods[down_periods > 0] = 0
+        up_ema = up_periods.ewm(periods).mean()
+        down_ema = down_periods.ewm(periods).mean().abs()
+        rs = up_ema / down_ema
+        rsi = 100 - (100 / (1 + rs))
+
+        return rsi
+
+    def buy(self, market, price, amount):
+        current_price = float(self.ticker.ix[market, 'lowestAsk'])
+        orderType = 'postOnly' if float(price) < current_price else 'immediateOrCancel'
+        result = self._polo.buy(market, price, amount, orderType=orderType)
+
+        return result
+
+    def sell(self, market, price, amount):
+        current_price = float(self.ticker.ix[market, 'highestBid'])
+        orderType = 'postOnly' if float(price) > current_price else 'immediateOrCancel'
+        result = self._polo.sell(market, price, amount, orderType=orderType)
+
+        return result
 
 class BackTest:
     def __init__(self, data, tradepct=10, btcbalance=0.01, coinbalance=0.0,

@@ -18,8 +18,7 @@ class MainWindow(tk.Tk):
     def __init__(self):
         tk.Tk.__init__(self)
         self.title(apptitle)
-        self.maxsize(width=100, height=1024)
-        self.minsize(width=100, height=100)
+        self.minsize(width=400, height=100)
         self.resizable(False, True)
 
         menubar = tk.Menu(self)
@@ -55,13 +54,20 @@ class MainWindow(tk.Tk):
         menubar.add_cascade(label="Markets", menu=market_menu)
         self.config(menu=menubar)
 
+        self.balances_frame = tk.Frame(self)
+        self.balances_frame.pack(expand=1, fill='both')
+        self._after_id = self.after(2500, self._display_balances)
+
+
         self.protocol("WM_DELETE_WINDOW", self._stop_everything)
 
     def _open_market(self, market):
         pdat.add_chart(market)
         market_window = tk.Toplevel()
         market_window.title(market + " - " + apptitle)
-        market = ChartFrame(market_window, market, 640, 400)
+        market_window.maxsize(width=1600, height=1024)
+        market_window.minsize(width=640, height=400)
+        market = ChartFrame(market_window, market, 400, 400)
         market.pack(fill=tk.BOTH, expand=tk.YES)
 
     def _stop_everything(self):
@@ -69,6 +75,28 @@ class MainWindow(tk.Tk):
         pdat.stop_charts()
         self.destroy()
         quit(0)
+
+    def _display_balances(self):
+        if pdat.balances is not None:
+            self.balances_frame.destroy()
+            self.balances_frame = tk.Frame(self)
+            self.balances_frame.pack(expand=1, fill='both')
+            row = 0
+            tk.Label(self.balances_frame, text="Currency").grid(row=row, column=0, padx=10)
+            tk.Label(self.balances_frame, text="Available").grid(row=row, column=1, padx=10)
+            tk.Label(self.balances_frame, text="On Orders").grid(row=row, column=2, padx=10)
+            tk.Label(self.balances_frame, text="BTC Value").grid(row=row, column=3, padx=10)
+            for c in sorted(pdat.balances):
+                row += 1
+                if float(pdat.balances[c]['btcValue']) > 0.0:
+                    available = '{:.8f}'.format(float(pdat.balances[c]['available']))[:10]
+                    onorders = '{:.8f}'.format(float(pdat.balances[c]['onOrders']))[:10]
+                    btcvalue = '{:.8f}'.format(float(pdat.balances[c]['btcValue']))[:10]
+                    tk.Label(self.balances_frame, text=c).grid(row=row, column=0, padx=10, sticky="nsew")
+                    tk.Label(self.balances_frame, text=available).grid(row=row, column=1, padx=10)
+                    tk.Label(self.balances_frame, text=onorders).grid(row=row, column=2, padx=10)
+                    tk.Label(self.balances_frame, text=btcvalue).grid(row=row, column=3, padx=10)
+        self._after_id = self.after(2500, self._display_balances)
 
 class ChartFrame(tk.Frame):
     def __init__(self, parent, market, width, height):
@@ -87,7 +115,6 @@ class ChartFrame(tk.Frame):
         self.label_width = 42
         self.offset = -1
         self.candle_freq = '30Min'
-        self._after_id = None
         self.visible_data_length = None
         self.indicator = 'macd'
         self.macd = {'ema_fast': 12, 'ema_slow': 26, 'ema_signal': 9}
@@ -96,6 +123,10 @@ class ChartFrame(tk.Frame):
         self.sma_cols = ['blue', 'orange', 'grey']
         self.ema = [0, 0, 0]
         self.ema_cols = ['cyan', 'yellow', 'brown']
+
+        self._buy_window = None
+        self._sell_window = None
+        self._cfg_win = None
 
         self.market_info = tk.StringVar()
         self.market_info.set(self.market)
@@ -140,18 +171,18 @@ class ChartFrame(tk.Frame):
 
         button_frame = tk.Frame(self)
         button_frame.pack(anchor='nw', fill='x')
-        button = tk.Button(button_frame, text='Buy', command=lambda d=-6: self.change_offset(d))
+        button = tk.Button(button_frame, text='Buy', command=self._buy)
         button.pack(side='left')
         self.buy_price_label = tk.Label(button_frame, text='0.00001234')
         self.buy_price_label.pack(side='left')
-        button = tk.Button(button_frame, text='Sell', command=lambda d=-1: self.change_offset(d))
+        button = tk.Button(button_frame, text='Sell', command=self._sell)
         button.pack(side='left')
         self.sell_price_label = tk.Label(button_frame, text='0.00001234')
         self.sell_price_label.pack(side='left')
-        button = tk.Button(button_frame, text='Auto', command=lambda d=1: self.change_offset(d))
+        button = tk.Button(button_frame, text='Auto')
         button.pack(side='right')
 
-        self._after_id = self.after(1000, self._update_data)
+        self.after(1000, self._update_data)
 
     def _update_data(self):
         if pdat.charts[self.market] is not None:
@@ -169,7 +200,7 @@ class ChartFrame(tk.Frame):
         else:
             label_string = "Waiting for market data for " + self.market
             self.market_info.set(label_string)
-        self._after_id = self.after(1000, self._update_data)
+        self.after(1000, self._update_data)
 
     def draw_chart(self):
         if self.chart_data is not None:
@@ -199,12 +230,13 @@ class ChartFrame(tk.Frame):
             line50 = self._get_y(50, 0, 100, y4 - y3, y4)
             line70 = self._get_y(70, 0, 100, y4 - y3, y4)
 
-            m, s, h = self.calculate_macd(data['close'])
+            m, s, h = pdat.calculate_macd(data['close'],
+                                          self.macd['ema_fast'], self.macd['ema_slow'], self.macd['ema_signal'])
             data['MACDLine'] = m
             data['SignalLine'] = s
             data['Histogram'] = h
 
-            data['rsi'] = self.calculate_rsi(data['close'])
+            data['rsi'] = pdat.calculate_rsi(data['close'], self.rsi['periods'])
             if self.indicator == 'rsi':
                 self.canvas.create_line(x1 + self.label_width, line30, x2, line30, fill='red', tags='chart')
                 self.canvas.create_line(x1 + self.label_width, line50, x2, line50, fill='black', tags='chart')
@@ -319,26 +351,6 @@ class ChartFrame(tk.Frame):
             self.canvas.create_rectangle(x1 + self.label_width, y1, x2, y2, fill='', tags='chart')
             self.canvas.create_rectangle(x1 + self.label_width, y3, x2, y4, fill='', tags='chart')
 
-    def calculate_macd(self, closes):
-        ema_fast = closes.ewm(self.macd['ema_fast']).mean()
-        ema_slow = closes.ewm(self.macd['ema_slow']).mean()
-        macd_line = ema_fast - ema_slow
-        signal_line = macd_line.ewm(self.macd['ema_signal']).mean()
-        histogram = macd_line - signal_line
-        return macd_line, signal_line, histogram
-
-    def calculate_rsi(self, closes):
-        delta = closes.diff()
-        up_periods, down_periods = delta.copy(), delta.copy()
-        up_periods[up_periods <= 0] = 0
-        down_periods[down_periods > 0] = 0
-        up_ema = up_periods.ewm(self.rsi['periods']).mean()
-        down_ema = down_periods.ewm(self.rsi['periods']).mean().abs()
-        rs = up_ema / down_ema
-        rsi = 100 - (100 / (1 + rs))
-
-        return rsi
-
     def _get_y(self, y_in, y_min, y_max, height, bottom):
         y_out = ((y_in - y_min) / (y_max - y_min)) * height
         y_out = bottom - y_out
@@ -376,63 +388,65 @@ class ChartFrame(tk.Frame):
         self.y_scale = float(event.height) / self.height
         self.width = event.width
         self.height = event.height
-        self.canvas.config(width=self.width, height=self.height)
+        self.canvas.config(width=self.width, height=self.height-100)
         self.canvas.scale("all", 0, 0, self.x_scale, self.y_scale)
         self.candle_width *= self.x_scale
         self.label_width *= self.x_scale
 
     def _config_chart(self, event):
-        self.cfg_win = tk.Toplevel(self)
-        self.cfg_win.title("Config Chart")
-        tk.Label(self.cfg_win, text="SMA 1").grid(row=0, column=0)
-        self.sma1 = tk.Entry(self.cfg_win, width=4)
-        self.sma1.insert(0, self.sma[0])
-        self.sma1.grid(row=0, column=1)
-        tk.Label(self.cfg_win, text="SMA 2").grid(row=1, column=0)
-        self.sma2 = tk.Entry(self.cfg_win, width=4)
-        self.sma2.insert(0, self.sma[1])
-        self.sma2.grid(row=1, column=1)
-        tk.Label(self.cfg_win, text="SMA 3").grid(row=2, column=0)
-        self.sma3 = tk.Entry(self.cfg_win, width=4)
-        self.sma3.insert(0, self.sma[2])
-        self.sma3.grid(row=2, column=1)
-        tk.Label(self.cfg_win, text="EMA 1").grid(row=0, column=2)
-        self.ema1 = tk.Entry(self.cfg_win, width=4)
-        self.ema1.insert(0, self.ema[0])
-        self.ema1.grid(row=0, column=3)
-        tk.Label(self.cfg_win, text="EMA 2").grid(row=1, column=2)
-        self.ema2 = tk.Entry(self.cfg_win, width=4)
-        self.ema2.insert(0, self.ema[1])
-        self.ema2.grid(row=1, column=3)
-        tk.Label(self.cfg_win, text="EMA 3").grid(row=2, column=2)
-        self.ema3 = tk.Entry(self.cfg_win, width=4)
-        self.ema3.insert(0, self.ema[2])
-        self.ema3.grid(row=2, column=3)
+        if self._cfg_win is None:
+            self._cfg_win = tk.Toplevel(self)
+            self._cfg_win.title("Config Chart")
+            tk.Label(self._cfg_win, text="SMA 1").grid(row=0, column=0)
+            self.sma1 = tk.Entry(self._cfg_win, width=4)
+            self.sma1.insert(0, self.sma[0])
+            self.sma1.grid(row=0, column=1)
+            tk.Label(self._cfg_win, text="SMA 2").grid(row=1, column=0)
+            self.sma2 = tk.Entry(self._cfg_win, width=4)
+            self.sma2.insert(0, self.sma[1])
+            self.sma2.grid(row=1, column=1)
+            tk.Label(self._cfg_win, text="SMA 3").grid(row=2, column=0)
+            self.sma3 = tk.Entry(self._cfg_win, width=4)
+            self.sma3.insert(0, self.sma[2])
+            self.sma3.grid(row=2, column=1)
+            tk.Label(self._cfg_win, text="EMA 1").grid(row=0, column=2)
+            self.ema1 = tk.Entry(self._cfg_win, width=4)
+            self.ema1.insert(0, self.ema[0])
+            self.ema1.grid(row=0, column=3)
+            tk.Label(self._cfg_win, text="EMA 2").grid(row=1, column=2)
+            self.ema2 = tk.Entry(self._cfg_win, width=4)
+            self.ema2.insert(0, self.ema[1])
+            self.ema2.grid(row=1, column=3)
+            tk.Label(self._cfg_win, text="EMA 3").grid(row=2, column=2)
+            self.ema3 = tk.Entry(self._cfg_win, width=4)
+            self.ema3.insert(0, self.ema[2])
+            self.ema3.grid(row=2, column=3)
 
-        self.indicator_mode = tk.StringVar()
-        self.indicator_mode.set(self.indicator)
-        tk.Radiobutton(self.cfg_win, text="MACD", variable=self.indicator_mode, value='macd').grid(row=3, column=0)
-        tk.Radiobutton(self.cfg_win, text="RSI", variable=self.indicator_mode, value='rsi').grid(row=3, column=2)
+            self.indicator_mode = tk.StringVar()
+            self.indicator_mode.set(self.indicator)
+            tk.Radiobutton(self._cfg_win, text="MACD", variable=self.indicator_mode, value='macd').grid(row=3, column=0)
+            tk.Radiobutton(self._cfg_win, text="RSI", variable=self.indicator_mode, value='rsi').grid(row=3, column=2)
 
-        tk.Label(self.cfg_win, text="MACD Fast EMA").grid(row=4, column=0)
-        self.macd_f_ema = tk.Entry(self.cfg_win, width=4)
-        self.macd_f_ema.insert(0, self.macd['ema_fast'])
-        self.macd_f_ema.grid(row=4, column=1)
-        tk.Label(self.cfg_win, text="MACD Slow EMA").grid(row=5, column=0)
-        self.macd_s_ema = tk.Entry(self.cfg_win, width=4)
-        self.macd_s_ema.insert(0, self.macd['ema_slow'])
-        self.macd_s_ema.grid(row=5, column=1)
-        tk.Label(self.cfg_win, text="MACD Signal EMA").grid(row=6, column=0)
-        self.macd_sig_ema = tk.Entry(self.cfg_win, width=4)
-        self.macd_sig_ema.insert(0, self.macd['ema_signal'])
-        self.macd_sig_ema.grid(row=6, column=1)
-        tk.Label(self.cfg_win, text="RSI Periods").grid(row=4, column=2)
-        self.rsi_periods = tk.Entry(self.cfg_win, width=4)
-        self.rsi_periods.insert(0, self.rsi['periods'])
-        self.rsi_periods.grid(row=4, column=3)
+            tk.Label(self._cfg_win, text="MACD Fast EMA").grid(row=4, column=0)
+            self.macd_f_ema = tk.Entry(self._cfg_win, width=4)
+            self.macd_f_ema.insert(0, self.macd['ema_fast'])
+            self.macd_f_ema.grid(row=4, column=1)
+            tk.Label(self._cfg_win, text="MACD Slow EMA").grid(row=5, column=0)
+            self.macd_s_ema = tk.Entry(self._cfg_win, width=4)
+            self.macd_s_ema.insert(0, self.macd['ema_slow'])
+            self.macd_s_ema.grid(row=5, column=1)
+            tk.Label(self._cfg_win, text="MACD Signal EMA").grid(row=6, column=0)
+            self.macd_sig_ema = tk.Entry(self._cfg_win, width=4)
+            self.macd_sig_ema.insert(0, self.macd['ema_signal'])
+            self.macd_sig_ema.grid(row=6, column=1)
+            tk.Label(self._cfg_win, text="RSI Periods").grid(row=4, column=2)
+            self.rsi_periods = tk.Entry(self._cfg_win, width=4)
+            self.rsi_periods.insert(0, self.rsi['periods'])
+            self.rsi_periods.grid(row=4, column=3)
 
-        tk.Button(self.cfg_win, text="OK", command=self.config_ok).grid(row=7, column=3, sticky='e')
-        self.wait_window(self.cfg_win)
+            tk.Button(self._cfg_win, text="OK", command=self.config_ok).grid(row=7, column=3, sticky='e')
+
+            self._cfg_win.protocol("WM_DELETE_WINDOW", self._cfg_win_close)
 
     def config_ok(self):
         try:
@@ -444,10 +458,33 @@ class ChartFrame(tk.Frame):
             self.macd['ema_signal'] = int(self.macd_sig_ema.get())
             self.rsi['periods'] = int(self.rsi_periods.get())
 
-            self.cfg_win.destroy()
+            self._cfg_win.destroy()
+            self._cfg_win = None
             self.draw_chart()
         except:
             print("Error!")
+
+    def _cfg_win_close(self):
+        self._cfg_win.destroy()
+        self._cfg_win = None
+
+    def _buy(self):
+        if self._buy_window is None:
+            self._buy_window = BuyWindow(self.market)
+            self._buy_window.protocol("WM_DELETE_WINDOW", self._buy_window_close)
+
+    def _buy_window_close(self):
+        self._buy_window.destroy()
+        self._buy_window = None
+
+    def _sell(self):
+        if self._sell_window is None:
+            self._sell_window = SellWindow(self.market)
+            self._sell_window.protocol("WM_DELETE_WINDOW", self._sell_window_close)
+
+    def _sell_window_close(self):
+        self._sell_window.destroy()
+        self._sell_window = None
 
 class APIKeyInput(tk.Frame):
     def __init__(self, parent):
@@ -488,6 +525,171 @@ class APIKeyInput(tk.Frame):
         else:
             self._warning_label["text"] = warning
 
+class BuyWindow(tk.Toplevel):
+    def __init__(self, market):
+        tk.Toplevel.__init__(self)
+        self.resizable(False, True)
+        self.market = market
+        self.title("Buy " + market.split("_")[1])
+
+        self.frame = tk.Frame(self)
+        self.frame.pack(fill='both', expand=0)
+
+        tk.Label(self.frame, text="Available:").grid(row=0, column=0, pady=10)
+        self.available = tk.Label(self.frame, width=12, text=pdat.balances[self.market.split('_')[0]]["available"])
+        self.available.grid(row=0, column=1, sticky='e')
+        tk.Label(self.frame, text=self.market.split("_")[0]).grid(row=0, column=2, sticky="w")
+
+        tk.Label(self.frame, text="Price:").grid(row=1, column=0, padx=10)
+        prc_val = (self.register(self._validate_price), '%P')
+        self.price = tk.Entry(self.frame, width=12, justify='right', validate='focusout', validatecommand=prc_val)
+        self.price.grid(row=1, column=1)
+        tk.Label(self.frame, text=self.market.split("_")[0]).grid(row=1, column=2, sticky="w")
+
+        tk.Label(self.frame, text="Amount:").grid(row=2, column=0, padx=10)
+        amt_val = (self.register(self._validate_amount), '%P')
+        self.amount = tk.Entry(self.frame, width=12, justify='right', validate='focusout', validatecommand=amt_val)
+        self.amount.grid(row=2, column=1)
+        tk.Label(self.frame, text=self.market.split("_")[1]).grid(row=2, column=2, sticky="w")
+
+        tk.Label(self.frame, text="Total:").grid(row=3, column=0, padx=10)
+        tot_val = (self.register(self._validate_total), '%P')
+        self.total = tk.Entry(self.frame, width=12, text='', justify='right', validate='focusout', validatecommand=tot_val)
+        self.total.grid(row=3, column=1)
+        tk.Label(self.frame, text=self.market.split("_")[0]).grid(row=3, column=2, sticky="w")
+
+        self.result_label = tk.Label(self.frame, text="")
+        self.result_label.grid(row=4, column=0, columnspan=2)
+
+        tk.Button(self.frame, text="Buy", command=self._buy).grid(row=4, column=2, padx=10, pady=10)
+
+        self.price.delete(1, 'end')
+        self.price.insert(0, '{:.8f}'.format(pdat.ticker.ix[self.market, 'lowestAsk'])[:9])
+        self.amount.delete(1, 'end')
+        self.amount.insert(0, '0.0')
+        self.total.delete(1, 'end')
+        self.total.insert(0, '0.0')
+
+    def _validate_amount(self, value_if_allowed):
+        try:
+            v = float(value_if_allowed)
+            self.total.delete(1, 'end')
+            self.total.insert(0, '{:.8f}'.format(float(self.price.get()) * v)[:9])
+            return True
+        except ValueError:
+            return False
+
+    def _validate_price(self, value_if_allowed):
+        try:
+            v = float(value_if_allowed)
+            self.total.delete(1, 'end')
+            self.total.insert(0, '{:.8f}'.format(float(self.amount.get()) * v)[:9])
+            return True
+        except ValueError:
+            return False
+
+    def _validate_total(self, value_if_allowed):
+        try:
+            v = float(value_if_allowed)
+            self.amount.delete(1, 'end')
+            self.amount.insert(0, '{:.8f}'.format(v / float(self.price.get()))[:9])
+            return True
+        except ValueError:
+            return False
+
+    def _buy(self):
+        price = self.price.get()
+        amount = self.amount.get()
+        print("Buy", self.market, price, amount)
+        result = pdat.buy(self.market, price, amount)
+        self.result_label['text'] = result
+
+class SellWindow(tk.Toplevel):
+    def __init__(self, market):
+        tk.Toplevel.__init__(self)
+        self.resizable(False, True)
+        self.market = market
+        self.title = "Sell " + market.split("_")[1]
+    def __init__(self, market):
+        tk.Toplevel.__init__(self)
+        self.resizable(False, True)
+        self.market = market
+        self.title("Sell " + market.split("_")[1])
+
+        self.frame = tk.Frame(self)
+        self.frame.pack(fill='both', expand=0)
+
+        tk.Label(self.frame, text="Available:").grid(row=0, column=0, pady=10)
+        self.available = tk.Label(self.frame, width=12, text=pdat.balances[self.market.split('_')[1]]["available"])
+        self.available.grid(row=0, column=1, sticky='e')
+        tk.Label(self.frame, text=self.market.split("_")[1]).grid(row=0, column=2, sticky="w")
+
+        tk.Label(self.frame, text="Price:").grid(row=1, column=0, padx=10)
+        prc_val = (self.register(self._validate_price), '%P')
+        self.price = tk.Entry(self.frame, width=12, justify='right', validate='focusout', validatecommand=prc_val)
+        self.price.grid(row=1, column=1)
+        tk.Label(self.frame, text=self.market.split("_")[0]).grid(row=1, column=2, sticky="w")
+
+        tk.Label(self.frame, text="Amount:").grid(row=2, column=0, padx=10)
+        amt_val = (self.register(self._validate_amount), '%P')
+        self.amount = tk.Entry(self.frame, width=12, justify='right', validate='focusout', validatecommand=amt_val)
+        self.amount.grid(row=2, column=1)
+        tk.Label(self.frame, text=self.market.split("_")[1]).grid(row=2, column=2, sticky="w")
+
+        tk.Label(self.frame, text="Total:").grid(row=3, column=0, padx=10)
+        tot_val = (self.register(self._validate_total), '%P')
+        self.total = tk.Entry(self.frame, width=12, text='', justify='right', validate='focusout', validatecommand=tot_val)
+        self.total.grid(row=3, column=1)
+        tk.Label(self.frame, text=self.market.split("_")[0]).grid(row=3, column=2, sticky="w")
+
+        self.result_label = tk.Label(self.frame, text="")
+        self.result_label.grid(row=4, column=0, columnspan=2)
+
+        tk.Button(self.frame, text="Sell", command=self._sell).grid(row=4, column=2, padx=10, pady=10)
+
+        self.price.delete(1, 'end')
+        self.price.insert(0, '{:.8f}'.format(pdat.ticker.ix[self.market, 'highestBid'])[:9])
+        self.amount.delete(1, 'end')
+        self.amount.insert(0, '0.0')
+        self.total.delete(1, 'end')
+        self.total.insert(0, '0.0')
+
+    def _validate_amount(self, value_if_allowed):
+        try:
+            v = float(value_if_allowed)
+            self.total.delete(1, 'end')
+            self.total.insert(0, '{:.8f}'.format(float(self.price.get()) * v)[:9])
+            return True
+        except ValueError:
+            return False
+
+    def _validate_price(self, value_if_allowed):
+        try:
+            v = float(value_if_allowed)
+            self.total.delete(1, 'end')
+            self.total.insert(0, '{:.8f}'.format(float(self.amount.get()) * v)[:9])
+            return True
+        except ValueError:
+            return False
+
+    def _validate_total(self, value_if_allowed):
+        try:
+            v = float(value_if_allowed)
+            self.amount.delete(1, 'end')
+            self.amount.insert(0, '{:.8f}'.format(v / float(self.price.get()))[:9])
+            return True
+        except ValueError:
+            return False
+
+    def _sell(self):
+        price = self.price.get()
+        amount = self.amount.get()
+        print("Sell", self.market, price, amount)
+        result = pdat.sell(self.market, price, amount)
+        self.result_label['text'] = result
+
+
+
 # quick and dirty api key input and save WARNING!! Saves as plain text
 filename = chartpath + '.key'
 if isfile(filename):
@@ -513,6 +715,9 @@ else:
 pdat = PoloData(api_key, api_secret)
 pdat.start_ticker(1)
 pdat.start_charts(60, chartpath)
+if api_secret != "":
+    pdat.start_balances(2)
+
 
 app = MainWindow()
 app.mainloop()
